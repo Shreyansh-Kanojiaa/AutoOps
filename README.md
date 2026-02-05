@@ -6,3 +6,4 @@ via environment variables, logging, and faliure handling..
 
 
 This project is build incremntally to mirror real-world service evolution
+# AutoOps
