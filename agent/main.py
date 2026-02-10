@@ -11,8 +11,9 @@ HOST = os.getenv("AUTOOPS_HOST", "127.0.0.1")
 PORT = int(os.getenv("AUTOOPS_PORT", "8000"))
 
 logging.basicConfig(
+    filename='logs.md'
     level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
 class HealthHandler(BaseHTTPRequestHandler):
