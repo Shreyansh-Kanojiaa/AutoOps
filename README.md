@@ -1,7 +1,3 @@
-Below is a **clean, professional README** you can paste directly into your repository.
-
----
-
 # AutoOps
 
 AutoOps is a lightweight monitoring-ready Python service built to demonstrate practical DevOps and SRE fundamentals.
