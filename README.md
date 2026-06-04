@@ -1,219 +1,202 @@
 # AutoOps
 
-AutoOps is a lightweight monitoring-ready Python service built to demonstrate practical DevOps and SRE fundamentals.
+AutoOps is a personal DevOps and SRE project built to explore service observability, monitoring, alerting, and incident response workflows.
 
-This project evolves from a simple HTTP service into a fully containerized, observable system using:
+The project consists of a Python HTTP service instrumented with Prometheus metrics and deployed alongside a monitoring stack using Docker Compose. It was built as a hands-on way to learn how production systems are monitored and how engineers investigate failures using metrics, dashboards, logs, and alerts.
 
-* Docker
-* Docker Compose
+## What It Does
+
+The application exposes:
+
+* Health endpoints
+* Prometheus metrics
+* Request counters
+* Error tracking
+* Request latency histograms
+* Service uptime metrics
+
+These metrics are collected by Prometheus and visualized in Grafana dashboards. Alert rules evaluate service health and generate alerts when predefined thresholds are exceeded.
+
+The project also includes a chaos endpoint that intentionally generates failures, making it possible to test alerting and monitoring workflows under controlled conditions.
+
+---
+
+## Architecture
+
+```text
+Client
+   │
+   ▼
+AutoOps Service
+   │
+   ├── Metrics ──► Prometheus
+   │                  │
+   │                  ▼
+   │               Grafana
+   │
+   └── Alerts ──► Alertmanager
+```
+
+The stack currently consists of:
+
+* Python service
+* Docker Compose deployment
 * Prometheus
 * Grafana
-* systemd (earlier phase)
+* Alertmanager
 
-It is designed as a multi-phase flagship learning project focused on real-world production concepts.
-
----
-
-## 🚀 Project Overview
-
-AutoOps exposes:
-
-* `/health` — service health endpoint with error-rate logic
-* `/metrics` — Prometheus-compatible metrics endpoint
-
-The project demonstrates:
-
-* HTTP service design
-* Graceful shutdown handling
-* Process supervision with systemd
-* Containerization with Docker
-* Multi-container orchestration
-* Metrics scraping with Prometheus
-* Visualization with Grafana
-* SELinux troubleshooting (Fedora)
-* Networking and service exposure
+Additional observability components are being added as the project evolves.
 
 ---
 
-## 🧱 Architecture
+## Technologies Used
 
-```
-AutoOps (Python Service)
-        ↓
-Prometheus (scrapes /metrics)
-        ↓
-Grafana (visualizes metrics)
+| Component     | Technology     |
+| ------------- | -------------- |
+| Application   | Python         |
+| Containers    | Docker         |
+| Orchestration | Docker Compose |
+| Metrics       | Prometheus     |
+| Dashboards    | Grafana        |
+| Alerting      | Alertmanager   |
+| CI/CD         | GitHub Actions |
+
+---
+
+## Metrics Exposed
+
+Examples of metrics exposed by the service include:
+
+```text
+http_requests_total
+http_request_duration_seconds
+uptime_seconds
+errors_total
 ```
 
-Docker Compose manages the full stack.
+These metrics are scraped by Prometheus and used for dashboarding and alert evaluation.
 
 ---
 
-## 📦 Tech Stack
+## Dashboards
 
-* Python 3.12 (BaseHTTPServer)
-* Docker
-* Docker Compose v2
-* Prometheus
-* Grafana
-* Fedora Linux (development environment)
+The Grafana dashboards currently track:
 
----
+* Request rate (RPS)
+* Error rate
+* Service uptime
+* P95 latency
+* P99 latency
+* Alert status
 
-## 📁 Project Structure
-
-```
-AutoOps/
-│
-├── agent/                # Python service
-│   └── main.py
-│
-├── monitoring/
-│   ├── prometheus.yml
-│   └── grafana/
-│
-├── Dockerfile
-├── docker-compose.yml
-├── .gitignore
-└── README.md
-```
+The goal is to provide a quick overview of service health and make failures easy to identify.
 
 ---
 
-## ⚙️ Local Development (Without Docker)
+## Alerting
 
-Create a virtual environment:
+Prometheus evaluates alert rules against collected metrics.
+
+Current alert examples include:
+
+* High error rate
+* Service unavailable
+* Elevated latency
+* Crash-loop behaviour
+
+Alerts are routed through Alertmanager for processing and notification delivery.
+
+---
+
+## Chaos Testing
+
+A dedicated endpoint allows failures to be injected into the service:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-python agent/main.py
+curl http://localhost:8000/chaos
 ```
 
-Test endpoints:
-
-```bash
-curl http://127.0.0.1:8000/health
-curl http://127.0.0.1:8000/metrics
-```
+This makes it possible to validate dashboards, alert rules, and monitoring behaviour during failure scenarios.
 
 ---
 
-## 🐳 Run with Docker (Single Container)
+## Load Testing
 
-Build image:
-
-```bash
-docker build -t autoops:latest .
-```
-
-Run container:
+Traffic can be generated using ApacheBench:
 
 ```bash
-docker run -p 8000:8000 autoops:latest
+ab -n 5000 -c 50 http://localhost:8000/test
 ```
 
-Test:
+Load tests are useful for observing:
 
-```bash
-curl http://localhost:8000/health
-```
+* Request throughput
+* Latency behaviour
+* Error rate changes
+* Alert triggering
 
 ---
 
-## 🧩 Run Full Monitoring Stack (Docker Compose)
+## Running Locally
 
-Start stack:
+Clone the repository:
+
+```bash
+git clone https://github.com/Shreyansh-Kanojiaa/AutoOps.git
+cd AutoOps
+```
+
+Start the stack:
 
 ```bash
 docker compose up -d --build
 ```
 
-This launches:
+Access the services:
 
-* AutoOps service
-* Prometheus
-* Grafana
-
----
-
-## 📊 Access Services
-
-| Service    | URL                                            |
-| ---------- | ---------------------------------------------- |
-| AutoOps    | [http://localhost:8000](http://localhost:8000) |
-| Prometheus | [http://localhost:9090](http://localhost:9090) |
-| Grafana    | [http://localhost:3000](http://localhost:3000) |
-
-Default Grafana login:
-
-```
-Username: admin
-Password: admin
-```
+| Service      | Address               |
+| ------------ | --------------------- |
+| Grafana      | http://localhost:3000 |
+| Prometheus   | http://localhost:9090 |
+| Alertmanager | http://localhost:9093 |
 
 ---
 
-## 📈 Metrics Exposed
+## CI Pipeline
 
-The `/metrics` endpoint provides:
+GitHub Actions runs automatically on pushes and pull requests.
 
-* `uptime_seconds` (gauge)
-* `requests_total` (counter)
-* `errors_total` (counter)
-* `avg_response_seconds` (gauge)
+The pipeline currently performs:
 
-Prometheus scrapes these and Grafana visualizes them.
-
----
-
-## 🧠 Concepts Demonstrated
-
-* Health check design
-* Error rate calculation
-* Metrics instrumentation
-* Prometheus exposition format
-* Docker networking
-* Service restarts and supervision
-* SELinux container permissions
-* Git workflow for production-ready repos
+* Python linting
+* Prometheus configuration validation
+* Alert rule validation
+* Docker image build verification
+* Service startup checks
 
 ---
 
-## 🔐 Production Considerations (Next Phases)
+## Why I Built This
 
-Planned enhancements:
+I built AutoOps to gain practical experience with observability and SRE tooling rather than only studying the concepts theoretically.
 
-* Reverse proxy (Nginx)
-* HTTPS with TLS
+While developing the project I encountered and resolved issues involving container networking, monitoring configuration, alert validation, SELinux permissions, Docker volumes, and service reliability. Working through those problems provided a much better understanding of how production monitoring systems behave than simply following tutorials.
+
+---
+
+## Future Work
+
+Planned improvements include:
+
+* Loki-based log aggregation
+* OpenTelemetry tracing
 * Kubernetes deployment
-* Alerting rules in Prometheus
-* CI/CD pipeline
-* Container security hardening
-* Resource limits
+* Alert notifications through Slack or email
+* Automated chaos testing workflows
 
 ---
 
-## 🎯 Purpose
+## License
 
-This repository serves as a hands-on DevOps learning project to:
-
-* Demonstrate infrastructure literacy
-* Showcase containerization expertise
-* Practice observability engineering
-* Build a portfolio-ready project for internships
-
----
-
-## 🛠 Requirements
-
-* Docker 24+
-* Docker Compose v2
-* Linux environment (tested on Fedora 43)
-
----
-
-## 📌 Version
-
-Current Stage: Phase 4 — Containerization + Monitoring Stack
+MIT License
 

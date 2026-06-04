@@ -3,6 +3,9 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY agent/ /app/agent/
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
 
 ENV AUTOOPS_HOST=0.0.0.0
 ENV AUTOOPS_PORT=8000

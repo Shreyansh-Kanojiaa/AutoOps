@@ -13,6 +13,8 @@ services:
       - "9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:Z
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:Z
+      - prometheus-data:/prometheus
     restart: unless-stopped
 
   grafana:
@@ -20,4 +22,38 @@ services:
     container_name: grafana
     ports:
       - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
     restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager:/etc/alertmanager:Z
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: promtail
+    user: root
+    security_opt:
+      - label:disable
+    volumes:
+      - ./monitoring/promtail:/etc/promtail:Z
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/promtail.yml
+
+volumes:
+  grafana-data:
+  prometheus-data:

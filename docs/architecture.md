@@ -1,41 +1,136 @@
-# Architecture Overview
+# AutoOps Architecture
 
-AutoOps is designed as a simple, single-node service that runs directly
-on Linux using systemd. This design was chosen to understand service
-behavior without abstractions.
+This document describes the architecture of the AutoOps observability stack. The system consists of an instrumented application and several monitoring components that collect metrics, logs, and alerts.
 
 ---
 
-## Key Design Decisions
+## System Overview
 
-### 1. No Frameworks
-The service uses Python's built-in HTTP server to avoid hiding
-behavior behind frameworks. This makes process lifecycle and
-network binding explicit.
-
-### 2. Environment-Based Configuration
-Host and port are configured via environment variables to allow the
-same code to run across different environments without modification.
-
-### 3. systemd Integration
-Instead of running as a background script, AutoOps is managed by
-systemd to simulate real production services:
-- supervised execution
-- automatic restarts
-- structured logging
-
-### 4. Graceful Shutdown
-Signal handling is implemented to ensure clean shutdowns when the
-service is stopped or restarted by systemd.
+```
+              +-------------+
+              |   Clients   |
+              +-------------+
+                     |
+                     v
+              +-------------+
+              |   AutoOps   |
+              | HTTP Server |
+              +-------------+
+                     |
+         +-----------+-----------+
+         |                       |
+         v                       v
+   +-----------+           +-----------+
+   | Prometheus|           | Promtail  |
+   |  Metrics  |           | Log Agent |
+   +-----------+           +-----------+
+         |                       |
+         v                       v
+   +-----------+           +-----------+
+   | Grafana   |           |   Loki    |
+   | Dashboards|           | Log Store |
+   +-----------+           +-----------+
+         |
+         v
+   +-------------+
+   | Alertmanager|
+   | Alert Router|
+   +-------------+
+```
 
 ---
 
-## Current Limitations
+## Components
 
-- Single-node only
-- No metrics endpoint yet
-- No alerting
-- No CI/CD
+### AutoOps Service
 
-These are intentional and will be added incrementally.
+A Python HTTP service that exposes operational metrics and structured logs.
 
+Responsibilities:
+- Serve application endpoints
+- Expose Prometheus metrics
+- Emit structured logs for request activity
+- Provide a chaos endpoint for testing alerts
+
+### Prometheus
+
+Prometheus scrapes metrics from the AutoOps service on a configured interval.
+
+Responsibilities:
+- Collect and store time series metrics
+- Evaluate alert rules
+- Fire alerts to Alertmanager when thresholds are breached
+
+### Grafana
+
+Grafana provides visualization for both metrics and logs. It queries Prometheus for metrics and Loki for logs.
+
+Dashboards display:
+- Request rate
+- Error rate
+- Latency percentiles (p95, p99)
+- Service uptime
+- Live container logs
+
+### Loki
+
+Loki is the log aggregation backend.
+
+Responsibilities:
+- Index and store container logs forwarded by Promtail
+- Serve log queries from Grafana
+
+### Promtail
+
+Promtail is the log collection agent. It runs as a container with access to the Docker socket, discovers other running containers, and ships their logs to Loki.
+
+Responsibilities:
+- Discover containers via Docker socket
+- Attach metadata labels (container name, job, etc.)
+- Forward logs to Loki
+
+### Alertmanager
+
+Alertmanager receives firing alerts from Prometheus and handles their delivery.
+
+Responsibilities:
+- Group related alerts
+- Deduplicate repeated alerts
+- Route alerts to configured notification channels
+
+---
+
+## Observability Pipeline
+
+```
+Application
+    |
+    |-- metrics --> Prometheus --> Grafana
+    |                   |
+    |                   v
+    |             Alertmanager
+    |
+    |-- logs --> Promtail --> Loki --> Grafana
+```
+
+Step by step:
+
+1. Application emits metrics and logs on every request
+2. Prometheus scrapes metrics at a regular interval
+3. Promtail collects logs from Docker containers
+4. Loki stores and indexes the logs
+5. Grafana queries both Prometheus and Loki for visualization
+6. Prometheus evaluates alert rules against collected metrics
+7. Alertmanager receives alerts and routes them to notification systems
+
+---
+
+## Design Goals
+
+AutoOps was designed to demonstrate core observability concepts used in production systems:
+
+- Metrics collection and storage
+- Log aggregation and querying
+- Alert rule evaluation and routing
+- Service level monitoring
+- Fully containerized, reproducible deployment

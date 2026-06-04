@@ -1,0 +1,73 @@
+name: AutoOps CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install flake8
+
+      - name: Lint Python
+        run: |
+          flake8 agent --max-line-length=120
+
+      # Validate Prometheus configuration
+      - name: Validate Prometheus config
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/monitoring:/etc/prometheus \
+            prom/prometheus \
+            promtool check config /etc/prometheus/prometheus.yml
+
+      # Validate alert rules
+      - name: Validate alert rules
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/monitoring:/etc/prometheus \
+            prom/prometheus \
+            promtool check rules /etc/prometheus/alerts.yml
+
+      - name: Build Docker image
+        run: |
+          docker build -t autoops .
+
+      - name: Start stack
+        run: |
+          docker compose up -d
+
+      # Wait for service properly instead of sleep
+      - name: Wait for service
+        run: |
+          for i in {1..30}; do
+            curl -sf http://localhost:8000/health && exit 0
+            sleep 2
+          done
+          echo "Service failed to start"
+          exit 1
+
+      - name: Test health endpoint
+        run: |
+          curl --fail http://localhost:8000/health
+
+      # Always clean up containers
+      - name: Tear down
+        if: always()
+        run: docker compose down

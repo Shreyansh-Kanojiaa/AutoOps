@@ -1,0 +1,88 @@
+groups:
+
+  - name: autoops-alerts
+    rules:
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[1m]))
+          /
+          sum(rate(http_requests_total[1m])) > 0.3
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "AutoOps error rate too high"
+          description: "Error rate exceeded 30% for 30 seconds"
+
+      - alert: AutoOpsDown
+        expr: up{job="autoops"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "AutoOps service down"
+          description: "Prometheus cannot scrape AutoOps for 30 seconds"
+
+      - alert: CrashLoopDetection
+        expr: changes(process_start_time_seconds{job="autoops"}[1m]) > 2
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Crash loop detected"
+          description: "Prometheus detected repeated AutoOps restarts"
+
+
+  - name: autoops-slo-alerts
+    rules:
+
+      - alert: AutoHighErrorRateFastBurn
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total[5m])) > (0.005 * 14)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AutoOps fast burn rate alert"
+          description: "Error rate > 7% for 5 minutes"
+
+      - alert: AutoOpsHighErrorRateSlowBurn
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[1h]))
+          /
+          sum(rate(http_requests_total[1h])) > (0.005 * 3)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AutoOps slow burn rate"
+          description: "Error rate > 1.5% over 1 hour"
+
+      - alert: AutoOpsHighLatencyP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            rate(http_request_duration_seconds_bucket[5m])
+          ) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AutoOps latency SLO violation"
+          description: "p95 latency above 200ms"
+
+      - alert: AutoOpsHighLatencyP99
+        expr: |
+          histogram_quantile(
+            0.99,
+            rate(http_request_duration_seconds_bucket[5m])
+          ) > 0.3
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High p99 latency detected"
+          description: "p99 request latency exceeded 300ms"
