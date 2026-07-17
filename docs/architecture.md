@@ -1,136 +1,128 @@
 # AutoOps Architecture
 
-This document describes the architecture of the AutoOps observability stack. The system consists of an instrumented application and several monitoring components that collect metrics, logs, and alerts.
+AutoOps is a containerized SRE/observability learning project. It pairs a small instrumented Python HTTP service with a full monitoring stack (Prometheus, Grafana, Loki, Promtail, Alertmanager) running under Docker Compose, so metrics, logs, and alerts can be exercised end-to-end — including deliberately breaking things via a chaos endpoint.
 
 ---
 
 ## System Overview
 
-```
-              +-------------+
-              |   Clients   |
-              +-------------+
-                     |
-                     v
-              +-------------+
-              |   AutoOps   |
-              | HTTP Server |
-              +-------------+
-                     |
-         +-----------+-----------+
-         |                       |
-         v                       v
-   +-----------+           +-----------+
-   | Prometheus|           | Promtail  |
-   |  Metrics  |           | Log Agent |
-   +-----------+           +-----------+
-         |                       |
-         v                       v
-   +-----------+           +-----------+
-   | Grafana   |           |   Loki    |
-   | Dashboards|           | Log Store |
-   +-----------+           +-----------+
-         |
-         v
-   +-------------+
-   | Alertmanager|
-   | Alert Router|
-   +-------------+
+```mermaid
+graph TD
+    Clients[HTTP Clients / ab load generator] -->|Requests| AutoOps[AutoOps HTTP Service :8000]
+
+    AutoOps -->|Exposes /metrics| Prometheus[Prometheus :9090]
+    Prometheus -->|Evaluates alerts.yml| Alertmanager[Alertmanager :9093]
+    Alertmanager -->|Webhook dispatch| Webhook[Webhook receiver :5001 - not included in stack]
+
+    AutoOps -.->|Container stdout/stderr| DockerSock(Docker Socket)
+    Promtail[Promtail Log Agent] -->|Scrapes| DockerSock
+    Promtail -->|Pushes logs| Loki[Loki :3100]
+
+    Grafana[Grafana :3000] -->|Queries metrics| Prometheus
+    Grafana -->|Queries logs| Loki
+
+    style AutoOps fill:#1f2335,stroke:#7aa2f7,stroke-width:2px,color:#c0caf5
+    style Prometheus fill:#24283b,stroke:#ff9e64,stroke-width:2px,color:#c0caf5
+    style Loki fill:#24283b,stroke:#9ece6a,stroke-width:2px,color:#c0caf5
+    style Grafana fill:#1f2335,stroke:#bb9af7,stroke-width:2px,color:#c0caf5
+    style Alertmanager fill:#24283b,stroke:#f7768e,stroke-width:2px,color:#c0caf5
 ```
 
 ---
 
 ## Components
 
-### AutoOps Service
+| Service | Port | Image / Source | Role |
+| :--- | :--- | :--- | :--- |
+| **AutoOps** | `8000` | `./Dockerfile` (Python 3.12-slim) | Instrumented HTTP service under observation. |
+| **Prometheus** | `9090` | `prom/prometheus:latest` | Scrapes metrics every 5s, evaluates alert rules. |
+| **Grafana** | `3000` | `grafana/grafana:latest` | Dashboards querying Prometheus (metrics) and Loki (logs). |
+| **Alertmanager** | `9093` | `prom/alertmanager:latest` | Groups, deduplicates, and routes firing alerts. |
+| **Loki** | `3100` | `grafana/loki:2.9.0` | Log aggregation and storage backend. |
+| **Promtail** | — (internal) | `grafana/promtail:2.9.0` | Tails `/var/run/docker.sock`, ships container logs to Loki. |
 
-A Python HTTP service that exposes operational metrics and structured logs.
-
-Responsibilities:
-- Serve application endpoints
-- Expose Prometheus metrics
-- Emit structured logs for request activity
-- Provide a chaos endpoint for testing alerts
-
-### Prometheus
-
-Prometheus scrapes metrics from the AutoOps service on a configured interval.
-
-Responsibilities:
-- Collect and store time series metrics
-- Evaluate alert rules
-- Fire alerts to Alertmanager when thresholds are breached
-
-### Grafana
-
-Grafana provides visualization for both metrics and logs. It queries Prometheus for metrics and Loki for logs.
-
-Dashboards display:
-- Request rate
-- Error rate
-- Latency percentiles (p95, p99)
-- Service uptime
-- Live container logs
-
-### Loki
-
-Loki is the log aggregation backend.
-
-Responsibilities:
-- Index and store container logs forwarded by Promtail
-- Serve log queries from Grafana
-
-### Promtail
-
-Promtail is the log collection agent. It runs as a container with access to the Docker socket, discovers other running containers, and ships their logs to Loki.
-
-Responsibilities:
-- Discover containers via Docker socket
-- Attach metadata labels (container name, job, etc.)
-- Forward logs to Loki
-
-### Alertmanager
-
-Alertmanager receives firing alerts from Prometheus and handles their delivery.
-
-Responsibilities:
-- Group related alerts
-- Deduplicate repeated alerts
-- Route alerts to configured notification channels
+All services are wired together in a single Docker Compose network (`docker-compose.yml`). Volume mounts use `:Z` SELinux labels for Fedora/RHEL compatibility.
 
 ---
 
-## Observability Pipeline
+## Application (`agent/main.py`)
 
-```
-Application
-    |
-    |-- metrics --> Prometheus --> Grafana
-    |                   |
-    |                   v
-    |             Alertmanager
-    |
-    |-- logs --> Promtail --> Loki --> Grafana
-```
+A minimal Python HTTP server — no framework, just `http.server` — instrumented with `prometheus_client`.
 
-Step by step:
+| Endpoint | Behavior |
+| :--- | :--- |
+| `GET /health` | Updates the `service_uptime_seconds` gauge, returns `200` with uptime. |
+| `GET /metrics` | Serves metrics in Prometheus text format. |
+| `GET /test` | Always returns `200` — used for load generation. |
+| `GET /chaos` | Always returns `500` and increments the error counter — used to trigger alerts. |
+| anything else | Returns `404`, increments the error counter. |
 
-1. Application emits metrics and logs on every request
-2. Prometheus scrapes metrics at a regular interval
-3. Promtail collects logs from Docker containers
-4. Loki stores and indexes the logs
-5. Grafana queries both Prometheus and Loki for visualization
-6. Prometheus evaluates alert rules against collected metrics
-7. Alertmanager receives alerts and routes them to notification systems
+**Metrics exposed:**
+- `http_requests_total{method,endpoint,status}` — counter
+- `http_errors_total` — counter
+- `http_request_duration_seconds` — histogram, 8 buckets from 10ms to 2s
+- `service_uptime_seconds` — gauge
+
+Every request is logged as `%(asctime)s | %(levelname)s | %(message)s`, including client IP, route, status, and latency. The process handles `SIGTERM`/`SIGINT` for graceful shutdown.
 
 ---
 
-## Design Goals
+## Alert Rules (`monitoring/alerts.yml`)
 
-AutoOps was designed to demonstrate core observability concepts used in production systems:
+**Operational alerts:**
+- `HighErrorRate` (critical) — 5xx rate > 30% over 1m, for 30s.
+- `AutoOpsDown` (critical) — Prometheus can't scrape the service, for 30s.
+- `CrashLoopDetection` (critical) — process restarts more than twice in 1m, for 30s.
 
-- Metrics collection and storage
-- Log aggregation and querying
-- Alert rule evaluation and routing
-- Service level monitoring
-- Fully containerized, reproducible deployment
+**SLO burn-rate alerts** (Google SRE-style, 99.5% error-budget target):
+- `AutoHighErrorRateFastBurn` (critical) — error rate > 7% over 5m, for 2m (~14x burn).
+- `AutoOpsHighErrorRateSlowBurn` (warning) — error rate > 1.5% over 1h, for 10m (~3x burn).
+- `AutoOpsHighLatencyP95` (warning) — p95 latency > 200ms over 5m, for 5m.
+- `AutoOpsHighLatencyP99` (warning) — p99 latency > 300ms over 5m, for 2m.
+
+Alertmanager routes all firing alerts to a webhook receiver at `http://localhost:5001/` (see `monitoring/alertmanager/alertmanager.yml`) — that receiver is not part of the Compose stack and must be run separately if you want to see deliveries.
+
+---
+
+## Log Pipeline
+
+1. AutoOps writes structured logs to stdout.
+2. Promtail (mounted read-only against the Docker socket) discovers containers and tails their output.
+3. Promtail relabels each stream with the container name and pushes it to Loki (`http://loki:3100/loki/api/v1/push`).
+4. Grafana queries Loki via LogQL, e.g. `{container="autoops"}`.
+
+---
+
+## Grafana Dashboards
+
+`dashboards/autoops-dashboard.json` tracks request rate (RPS), error rate, p95/p99 latency, service uptime, and alert status.
+
+---
+
+## Testing & Validation
+
+**Load generation:**
+```bash
+ab -n 5000 -c 50 http://localhost:8000/test
+```
+
+**Chaos / alert testing:**
+```bash
+curl http://localhost:8000/chaos
+```
+
+**CI (`.github/workflows/ci.yml`)** runs on every push/PR:
+- `flake8` lint on `agent/`
+- `promtool check config` on `prometheus.yml`
+- `promtool check rules` on `alerts.yml`
+- Docker image build
+- Full Compose stack boot + `/health` check + teardown
+
+---
+
+## Planned Next Steps
+
+- OpenTelemetry tracing
+- Kubernetes deployment
+- Slack/email alert notifications
+- Automated chaos testing workflows
