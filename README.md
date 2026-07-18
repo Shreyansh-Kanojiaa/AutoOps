@@ -130,10 +130,10 @@ ab -n 5000 -c 50 http://localhost:8000/test
 
 Load tests are useful for observing:
 
-* Request throughput
-* Latency behaviour
-* Error rate changes
-* Alert triggering
+* Request throughput.
+* Latency behaviour.
+* Error rate changes.
+* Alert triggering.
 
 ---
 
